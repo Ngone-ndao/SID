@@ -1,0 +1,531 @@
+---
+title: "ADDdiagnostic"
+author: "Ouz_Stat"
+format: html
+editor: visual
+---
+
+# I.Introduction
+
+Ce rapport présente une analyse des données médicales pour la prédiction du diabète en utilisant plusieurs méthodes : LDA, QDA, KNN, et KDA. Nous explorons les données, réalisons un prétraitement, appliquons des modèles, et comparons leurs performances.
+
+## 1. Chargement des bibliothèques et des données
+
+### 1.1 Bibliothèques utilisées
+
+Ces bibliothèques sont utilisées pour la visualisation, l'analyse discriminante, la validation croisée, les courbes ROC, et les modèles de classification.
+
+```{r}
+library(ggplot2)
+library(MASS)
+library(VIM)                          # Pour LDA et QDA
+library(caret)          # Pour la validation croisée et les métriques de performa
+library(pROC)           # Pour la courbe ROC
+library(parallelly)
+library(pROC)
+library(kernlab)
+library(dplyr)  # Pour les fonctions %>% et mutate
+library(scales)  # Pour scale_y_continuous(labels = percent_format())
+library(biotools)
+```
+
+### 1.2 Chargement des données
+
+```{r}
+# Charger le dataset
+diabete <- read.csv("C:/Users/Ousmane/Desktop/Analyse de donné/base de donnée/diabetes.CSV", sep=",", header=TRUE)
+head(diabete)
+# Remplacer les valeurs de la colonne Outcome par des facteurs
+diabete$Outcome <- factor(diabete$Outcome, levels = c(0, 1), labels = c("Non diabétique", "Diabétique"))
+# Vérifier les modifications
+table(diabete$Outcome)
+
+```
+
+Description générale de la base --La base diabéte est chargé depuis un fichier CSV (diabetes.CSV).
+
+--La colonne Outcome est convertie en facteur avec les étiquettes "Non diabétique" et "Diabétique".
+
+--Objectif : Prédire si un patient est diabétique (Outcome = 1) ou non diabétique (Outcome = 0) en fonction de ses --caractéristiques médicales.
+
+--Taille : La base de donnée contient généralement 768 observations (patients) et 9 colonnes (8 caractéristiques + la variable–cible).
+
+--Origine : Cette base est souvent attribué à l'Institut national du diabète et des maladies digestives et rénales des (États-Unis).
+
+--Variables (colonnes)
+
+--Voici une description des colonnes présentes dans la base :
+
+--Pregnancies (NombreGrossesses) :
+
+--Nombre de fois où la patiente a été enceinte.
+
+--Type : Entier (int).
+
+--Glucose (NiveauGlucose) :
+
+--Concentration de glucose dans le plasma à 2 heures lors d'un test de tolérance au glucose oral.
+
+--Type : Entier (int).
+
+--BloodPressure (PressionArtérielle) :
+
+--Pression artérielle diastolique (en mm Hg).
+
+--Type : Entier (int).
+
+--SkinThickness (ÉpaisseurPliCutané) :
+
+--Épaisseur du pli cutané du triceps (en mm).
+
+--Type : Entier (int).
+
+--Insulin (NiveauInsuline) :
+
+--Insuline sérique à 2 heures (en mu U/ml).
+
+--Type : Entier (int).
+
+--BMI (IndiceMasseCorporelle) :
+
+--Indice de masse corporelle (poids en kg / (taille en m)\^2).
+
+--Type : Numérique (float).
+
+--DiabetesPedigreeFunction (ScoreDiabèteBaséHérédité) :
+
+--Fonction qui évalue la probabilité de diabète en fonction des antécédents familiaux.
+
+--Type : Numérique (float).
+
+--Age (ÂgePatient) :
+
+--Âge du patient (en années).
+
+--Type : Entier (int).
+
+--Outcome (Diagnostic) :
+
+## 2. Exploration et prétraitement des données
+
+### 2.1 Visualisation des valeurs manquantes:
+
+Utilisation de la fonction aggr() pour identifier les valeurs manquantes.
+
+```{r}
+# Utilisation de la fonction aggr() pour visualiser les valeurs manquantes
+aggr(diabete, col = c("blue", "yellow"), numbers = TRUE, sortVars = TRUE,
+     labels = names(diabete), cex.axis = 0.7, gap = 3, ylab = c("Histogram of missing data", "Pattern"),
+     combined = TRUE, only.miss = FALSE, prop = FALSE)
+```
+
+### 2.2 Identification des variables quantitatives et des boxplots pour chaque variabes
+
+Les colonnes numériques sont identifiées et des boxplots sont générés pour chaque variable.
+
+```{r}
+# Identifier les colonnes quantitatives
+vars_quantitatives <- sapply(diabete, is.numeric)
+# Créer un boxplot pour chaque variable quantitative
+for (var in names(diabete)[vars_quantitatives]) {
+  print(ggplot(diabete, aes(x = "", y = .data[[var]])) +
+          geom_boxplot(fill = "skyblue", color = "blue") +
+          theme_minimal() +
+          labs(title = paste("Boxplot de", var), x = "", y = var))
+  
+}
+
+```
+
+### 2.3 Renommage des colonnes et nettoyage des données
+
+Les colonnes sont renommées pour une meilleure lisibilité (par exemple, "NombreGrossesses", "NiveauGlucose", etc.).
+
+Les valeurs nulles (codées comme 0) dans certaines colonnes sont remplacées par la médiane des valeurs non nulles.
+
+```{r}
+# Renommer les colonnes correctement
+colnames(diabete) <- c(
+  "NombreGrossesses",  
+  "NiveauGlucose",  
+  "PressionArtérielle",  
+  "ÉpaisseurPliCutané",  
+  "NiveauInsuline",  
+  "IndiceMasseCorporelle",  
+  "ScoreDiabèteBaséHérédité",  
+  "ÂgePatient",  
+  "Diagnostic"
+)
+
+#- Nettoyage des données
+cols_to_replace <- c("NiveauGlucose", "PressionArtérielle", "ÉpaisseurPliCutané", "NiveauInsuline", "IndiceMasseCorporelle")
+for (col in cols_to_replace) {
+  median_value <- median(diabete[[col]][diabete[[col]] != 0], na.rm = TRUE)
+  diabete[[col]][diabete[[col]] == 0] <- median_value
+}
+str(diabete)
+summary(diabete)
+```
+
+### 2.4 Visualisation des distributions:
+
+Des histogrammes sont générés pour chaque variable quantitative.
+
+```{r}
+# Créer un histogramme pour chaque variable quantitative
+for (var in names(diabete)[vars_quantitatives]) {
+  print(ggplot(diabete, aes(x = .data[[var]])) +
+          geom_histogram(bins = 30, fill = "blue", color = "black") +
+          theme_minimal() +
+          labs(title = paste("Histogramme de", var), x = var, y = "Fréquence"))
+}
+```
+
+### 2.5 Visualisation des proportions de la variable à expliqué
+
+Fonction creer_barplot_proportion :
+
+Une fonction est créée pour générer un barplot en proportions pour une colonne donnée.
+
+Appliquée à la colonne "Diagnostic" pour visualiser la répartition des classes ("Non diabétique" vs "Diabétique").
+
+```{r}
+# Fonction pour créer un barplot en proportions
+creer_barplot_proportion <- function(data, column_name) {
+  # Calculer les proportions
+  proportions <- data %>%
+    count(.data[[column_name]]) %>%
+    mutate(proportion = n / sum(n))
+  # Créer le barplot
+  ggplot(proportions, aes(x = reorder(.data[[column_name]], -proportion), y = proportion, fill = .data[[column_name]])) +
+    geom_bar(stat = "identity") +
+    scale_y_continuous(labels = scales::percent_format()) +
+    labs(x = column_name, y = "Proportion (%)") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Incliner les étiquettes de l'axe x pour une meilleure lisibilité
+}
+
+# Créer un barplot pour la variable "Diagnostic"
+creer_barplot_proportion(diabete, "Diagnostic")
+```
+
+La base de donnée est déséquilibré, avec plus de patients non diabétiques que de patients diabétiques.
+
+Cela peut indiquer que le diabète est moins fréquent dans la population étudiée, ou que la base est biaisé.
+
+Supposons que le barplot montre les proportions suivantes :
+
+Non diabétiques (0) : 65 %
+
+Diabétiques (1) : 35 %
+
+## 4. Séparation des données en ensembles d'entraînement et de test
+
+## 4.1 Fractionnement des données
+
+Les données sont divisées en ensembles d'entraînement (70 %) et de test (30 %) à l'aide de
+
+createDataPartition().
+
+```{r}
+# Charger le package caret
+library(caret)
+
+# Définir la graine aléatoire
+set.seed(42)
+
+# Vérifier que la colonne Diagnostic est bien définie
+if (!"Diagnostic" %in% colnames(diabete)) {
+  stop("La colonne 'Diagnostic' n'existe pas dans le dataframe 'diabete'.")
+}
+
+# Séparation des ensembles d'entraînement et de test
+trainIndex <- createDataPartition(diabete$Diagnostic, p = 0.7, list = FALSE)
+traindiabete <- diabete[trainIndex,]
+testdiabete <- diabete[-trainIndex,]
+```
+
+### 5. Application des modèles de classification paramétrique et non paramétrique
+
+### 5.1 Application de modèle de classification paramérique
+
+#### 5.1.a Analyse Discriminante Linéaire (LDA): Homoxédasticité
+
+Appliqué à l'ensemble d'entraînement avec lda().
+
+Prédictions et évaluation :
+
+Prédictions sur l'ensemble de test.
+
+Matrice de confusion et calcul des taux de bon et de mal classement.
+
+```{r}
+# Application de l'Analyse Discriminante Linéaire (LDA)
+lda_model <- lda(Diagnostic ~ ., data = traindiabete)
+lda_model
+lda_pred <- predict(lda_model, testdiabete)$class
+lda_pred
+
+# Matrice de confusion et métriques de performance pour LDA
+confusionMatrix(lda_pred, testdiabete$Diagnostic)
+
+# 2. Taux de mal et bon classement 
+mal <- (sum(lda_pred != testdiabete$Diagnostic) / nrow(testdiabete)) * 100
+bon <- (sum(lda_pred == testdiabete$Diagnostic) / nrow(testdiabete)) * 100
+cat("Le taux de mal classement du modèle est de : ", round(mal, 2), "%\n", sep = "")
+cat("Le taux de bon classement du modèle est de : ", round(bon, 2), "%\n", sep = "")
+```
+
+### 5.1.b. Analyse Discriminante Quadratique (QDA):Hétéroxédasticité
+
+Modèle QDA :
+
+Appliqué à l'ensemble d'entraînement avec qda().
+
+Prédictions et évaluation :
+
+Prédictions sur l'ensemble de test.
+
+Matrice de confusion et calcul des taux de bon et de mal classement.
+
+```{r}
+# Application de l'Analyse Discriminante Quadratique (QDA)
+qda_model <- qda(Diagnostic ~ ., data = traindiabete)
+qda_model
+qda_pred <- predict(qda_model, testdiabete)$class
+
+# Matrice de confusion et métriques de performance pour QDA
+confusionMatrix(qda_pred, testdiabete$Diagnostic)
+
+# 2. Taux de mal et bon classement 
+mal <- (sum(qda_pred != testdiabete$Diagnostic) / nrow(testdiabete)) * 100
+bon <- (sum(qda_pred == testdiabete$Diagnostic) / nrow(testdiabete)) * 100
+cat("Le taux de mal classement du modèle est de : ", round(mal, 2), "%\n", sep = "")
+cat("Le taux de bon classement du modèle est de : ", round(bon, 2), "%\n", sep = "")
+
+```
+
+### 5.2 Application de modèle de classification non paramérique
+
+### 5.2.a.k-Nearest Neighbors (KNN)
+
+Appliqué avec knn() en utilisant 5 voisins.
+
+Prédictions et évaluation :
+
+Matrice de confusion et calcul des taux de bon et de mal classement.
+
+```{r}
+library(class)
+K <- 5 # Nombre de voisins
+
+knn_pred <- knn(traindiabete[, -which(names(traindiabete) == "Diagnostic")], 
+                testdiabete[, -which(names(testdiabete) == "Diagnostic")], 
+                traindiabete$Diagnostic, k = K)
+summary(knn_pred)
+
+# Vérification du modèle KNN
+table(testdiabete$Diagnostic, knn_pred)
+
+# Matrice de confusion et métriques de performance pour KNN
+confusionMatrix(knn_pred, testdiabete$Diagnostic)
+
+# 2. Taux de mal et bon classement 
+mal <- (sum(knn_pred != testdiabete$Diagnostic) / nrow(testdiabete)) * 100
+bon <- (sum(knn_pred == testdiabete$Diagnostic) / nrow(testdiabete)) * 100
+cat("Le taux de mal classement du modèle est de : ", round(mal, 2), "%\n", sep = "")
+cat("Le taux de bon classement du modèle est de : ", round(bon, 2), "%\n", sep = "")
+
+```
+
+5.2.b. Analyse Discriminante à Noyau (KDA) Modèle KDA :
+
+Appliqué avec ksvm() en utilisant un noyau linéaire (vanilladot).
+
+Prédictions et évaluation :
+
+Matrice de confusion et calcul des taux de bon et de mal classement.
+
+```{r}
+# Chargement de la bibliothèque kernlab
+library(kernlab)
+
+# Création d'un modèle d'analyse discriminante avec la méthode des noyaux
+modele_kda <- ksvm(Diagnostic ~ ., data = traindiabete, type = "C-svc", kernel = "vanilladot")
+
+# Prédiction sur la base test
+prediction <- predict(modele_kda, newdata = testdiabete)
+summary(prediction)
+
+# Matrice de confusion et métriques de performance
+confusionMatrix(prediction, testdiabete$Diagnostic)
+
+# 2. Taux de mal et bon classement 
+mal <- (sum(prediction != testdiabete$Diagnostic) / nrow(testdiabete)) * 100
+bon <- (sum(prediction == testdiabete$Diagnostic) / nrow(testdiabete)) * 100
+cat("Le taux de mal classement du modèle est de : ", round(mal, 2), "%\n", sep = "")
+cat("Le taux de bon classement du modèle est de : ", round(bon, 2), "%\n", sep = "")
+
+```
+
+REMARQUE DIFFERENCE ENTRE LDA, QDA, KNN et KDA
+
+LDA (Linear Discriminant Analysis), QDA (Quadratic Discriminant Analysis), KNN (K-Nearest Neighbors) et KDA (Kernel Discriminant Analysis) sont des techniques de classification qui reposent sur des hypothèses statistiques différentes.
+
+LDA (Analyse Discriminante Linéaire) • Hypothèse : Les classes suivent une distribution normale (gaussienne) et ont une même matrice de covariance.
+
+QDA (Analyse Discriminante Quadratique) • Hypothèse : Les classes suivent une distribution normale (gaussienne), mais chaque classe peut avoir une matrice de covariance différente.
+
+KNN (K-Nearest Neighbors) . Hypothèse : Aucune hypothèse spécifique sur la distribution des données. KNN est une méthode non paramétrique qui classe un point en fonction des classes majoritaires de ses K plus proches voisins.
+
+KDA (Kernel Discriminant Analysis) .Hypothèse : Extension de LDA utilisant des noyaux (kernels) pour transformer les données dans un espace de plus grande dimension où elles peuvent être séparées linéairement.
+
+6.  Évaluation des modèles Courbe ROC pour LDA :
+
+La courbe ROC est tracée pour évaluer les performances du modèle LDA.
+
+L'aire sous la courbe (AUC) est calculé
+
+## 6.Comparaison des courbes ROC
+
+```{r}
+# Extraire les probabilités prédites pour chaque modèle
+lda_prob <- predict(lda_model, testdiabete)$posterior[,2]  # Probabilités pour LDA
+qda_prob <- predict(qda_model, testdiabete)$posterior[,2]  # Probabilités pour QDA
+
+# Pour KNN, on utilise une approche binaire car la fonction knn() ne retourne pas de probabilités
+knn_prob <- ifelse(knn_pred == "Diabétique", 1, 0)
+
+# Réentraîner le modèle KDA avec prob.model = TRUE
+modele_kda <- ksvm(Diagnostic ~ ., data = traindiabete, type = "C-svc", kernel = "vanilladot", prob.model = TRUE)
+
+# Extraire les probabilités pour KDA
+kda_prob <- predict(modele_kda, newdata = testdiabete, type = "probabilities")[,2]
+
+# Calculer les courbes ROC pour chaque modèle
+roc_lda <- roc(testdiabete$Diagnostic, lda_prob)
+roc_qda <- roc(testdiabete$Diagnostic, qda_prob)
+roc_knn <- roc(testdiabete$Diagnostic, knn_prob)
+roc_kda <- roc(testdiabete$Diagnostic, kda_prob)
+
+# Afficher les courbes ROC sur le même graphique
+plot(roc_lda, col = "blue", main = "Courbes ROC comparées", print.auc = TRUE, auc.polygon = TRUE, grid = TRUE, legacy.axes = TRUE)
+lines(roc_qda, col = "red", print.auc = TRUE, auc.polygon = TRUE)
+lines(roc_knn, col = "green", print.auc = TRUE, auc.polygon = TRUE)
+lines(roc_kda, col = "purple", print.auc = TRUE, auc.polygon = TRUE)
+
+# Ajouter une légende
+legend("bottomright", legend = c("LDA", "QDA", "KNN", "KDA"),
+       col = c("blue", "red", "green", "purple"), lwd = 2)
+
+# Afficher les AUC pour chaque modèle
+cat("AUC pour LDA :", auc(roc_lda), "\n")
+cat("AUC pour QDA :", auc(roc_qda), "\n")
+cat("AUC pour KNN :", auc(roc_knn), "\n")
+cat("AUC pour KDA :", auc(roc_kda), "\n")
+```
+
+## 7.Tableau comparatif des modèles
+
+```{r}
+# Charger la bibliothèque ggplot2
+library(ggplot2)
+
+# Transformer le dataframe "results" en format long pour ggplot2
+results_long <- reshape2::melt(results, id.vars = "Modèle", variable.name = "Métrique", value.name = "Valeur")
+
+# Créer le diagramme en bandes
+ggplot(results_long, aes(x = Modèle, y = Valeur, fill = Métrique)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_text(aes(label = round(Valeur, 3)), position = position_dodge(width = 0.9), vjust = -0.5, size = 4) +
+  labs(
+    title = "Comparaison des performances des modèles",
+    x = "Modèles",
+    y = "Valeur",
+    fill = "Métrique"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+    axis.text.x = element_text(size = 12),
+    axis.text.y = element_text(size = 12),
+    legend.position = "top"
+  ) +
+  scale_fill_manual(values = c("AUC" = "skyblue", "Accuracy" = "lightgreen"))
+```
+
+• Un modèle parfait a une courbe qui monte rapidement vers le haut. • Un modèle aléatoire suit la diagonale (50 % de chance). • Un mauvais modèle est en dessous de la diagonale. AUC (Area Under Curve) : l’aire sous la courbe • AUC = 1️.0 → Modèle parfait. • AUC \> 0.9 → Excellente performance. • AUC entre 0.7 et 0.9 → Bonne performance. • AUC \< 0.5 → Mauvais modèle. Un AUC élevé signifie que le modèle distingue bien les classes.
+
+## TEXT
+
+```{r}
+# Sélectionner uniquement les variables numériques
+numeric_data <- diabete[, sapply(diabete, is.numeric)]
+
+# Vérifier que la variable de groupe est un facteur
+group <- as.factor(diabete$Diagnostic)
+
+# Appliquer le test de Box's M
+boxM_result <- boxM(numeric_data, group)
+
+# Afficher les résultats
+print(boxM_result)
+
+# Interprétation des résultats
+if (boxM_result$p.value < 0.05) {
+  cat("Conclusion : Les matrices de covariance ne sont pas homogènes (p-value =", boxM_result$p.value, ")\n")
+} else {
+  cat("Conclusion : Les matrices de covariance sont homogènes (p-value =", boxM_result$p.value, ")\n")
+}
+```
+
+1.  **Interprétation des résultats** :
+
+    -   Le test de Box's M produit une statistique de test (`Chi-Square`) et une p-value.
+
+    -   **Hypothèse nulle (H0)** : Les matrices de covariance sont égales entre les groupes.
+
+    -   **Hypothèse alternative (H1)** : Les matrices de covariance ne sont pas égales entre les groupes.
+
+    -   Si la **p-value** est inférieure au seuil de signification (généralement 0,05), vous rejetez H0 et concluez que les matrices de covariance ne sont pas homogènes.
+
+## 7.Exemple avec KDA
+
+Imaginons qu'on souhaites prédire si un individu est diabétique ou non en fonction de ses caractéristiques médicales:
+
+```{r}
+# Données du nouvel individu
+nouvel_individu <- data.frame(
+  NombreGrossesses = 5,            # Nombre de grossesses élevé
+  NiveauGlucose = 220,             # Glucose très élevé (signe clair de diabète)
+  PressionArtérielle = 100,         # Pression artérielle légèrement élevée
+  ÉpaisseurPliCutané = 40,         # Pli cutané épais (lié à l'obésité)
+  NiveauInsuline = 250,            # Niveau d'insuline anormalement élevé
+  IndiceMasseCorporelle = 38,      # IMC élevé (obésité)
+  ScoreDiabèteBaséHérédité = 1.5,  # Forte prédisposition héréditaire
+  ÂgePatient = 50                  # Âge avancé, facteur de risque
+)
+
+# Appliquer la prédiction avec KDA
+prediction_kda <- predict(modele_kda, newdata = nouvel_individu, type = "probabilities")
+
+# Extraire les probabilités
+probabilites_kda <- prediction_kda
+
+# Afficher les probabilités
+cat("Probabilités pour chaque classe (KDA) :\n")
+print(probabilites_kda)
+
+# Ajuster le seuil pour la prédiction
+seuil <- 0.4  # Vous pouvez ajuster ce seuil selon vos besoins
+classe_predite_kda <- ifelse(probabilites_kda[, "Diabétique"] > seuil, "Diabétique", "Non diabétique")
+
+# Affichage de la prédiction avec seuil ajusté
+cat("Classification avec seuil ajusté (KDA) :", classe_predite_kda, "\n")
+
+# Affichage de la prédiction par défaut (seuil = 0.5)
+prediction_label_kda <- ifelse(probabilites_kda[, "Diabétique"] > 0.5, "Diabétique", "Non diabétique")
+cat("Le nouveau patient est classé comme (KDA) :", prediction_label_kda, "\n")
+```
+
+## ,Quarto
