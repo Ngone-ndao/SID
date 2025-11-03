@@ -1,1 +1,5 @@
 Bonjour
+
+Bonjour, merci d'avoir suivi la présentation jusqu'à ce niveau. On a vu la base de git/GitHub.
+
+Exercez-vous à quelques reprise pour avoir la main !
